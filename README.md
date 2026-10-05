@@ -1,4 +1,4 @@
-# Policy gateway build: Stage 6 (tool path, model path, telemetry, agents, console, workflows, local model)
+# Policy gateway: runtime governance for AI agents (Profile 3 build)
 
 Open-source Tier 3 build. Every tool call and every model call passes through a policy gateway that
 asks who the caller is and what it intends, then denies, refers to a human, or allows.
@@ -31,19 +31,22 @@ asks who the caller is and what it intends, then denies, refers to a human, or a
 
 Every network except `egress` and `ui` is internal. The only published port is the console, on this machine only. Tests run from containers.
 
-## Upgrade from Stage 5
+## Install
+
+Requirements: Linux with Docker and the Docker Compose plugin, and `git`.
 
 ```bash
-cd ~/Projects
-tar -xzf ~/Downloads/governance-tier3-stage6-r8.tar.gz
-cd governance-tier3
-./scripts/gen-secrets.sh            # adds anything missing, changes nothing that exists
+git clone https://github.com/christopheH1/governance-tier3-policy-gateway.git
+cd governance-tier3-policy-gateway
+./scripts/bootstrap.sh              # fetches the pinned ARTO suite into vendor/
+./scripts/gen-secrets.sh            # creates .env with generated secrets
 docker compose build
 docker compose up -d --wait
-docker compose restart opa          # load the new policy and registry
 ```
 
-A first install also needs `./scripts/bootstrap.sh` before the build.
+To update an existing install: `git pull`, then `./scripts/gen-secrets.sh` (adds anything missing, changes
+nothing that exists), `docker compose build`, `docker compose up -d --wait` and `docker compose restart opa`
+to load the new policy and registry.
 
 To use the external provider, edit `.env`, set `ANTHROPIC_API_KEY=` to your key, and run
 `docker compose up -d model-adapter`. Without a key the mock model still works and everything else is unaffected.
@@ -96,7 +99,7 @@ the task and decides for itself, and the task text leaves the organisation.
 
 ## Workflows in LangGraph, and a local model
 
-Stage 6 lets a workflow application build and run the agents. Such applications speak two standard
+A workflow application can build and run the agents. Such applications speak two standard
 protocols, and the agent runtime now offers both as a **bridge** to the policy gateway:
 
 | For | Address (inside Docker) | Protocol |
@@ -196,7 +199,7 @@ docker compose --profile test run --rm telemetry-show python /tools/telemetry_su
 docker compose --profile test run --rm test-runner                  # 23 checks: Stage 1 foundation
 ```
 
-## Latency measurements for Chapter 7
+## Latency measurements
 
 ```bash
 ./scripts/latency-run.sh gateway                 # per-stage latency, tool path and model path
@@ -255,7 +258,7 @@ were removed unless it knows what the head should be.
 ## Folders
 
 ```
-governance-tier3/
+governance-tier3-policy-gateway/
 ├── docker-compose.yaml        Services, networks, test profiles
 ├── versions.lock              Pinned commit, image digests, package pins, patches
 ├── .env                       Generated secrets and your provider key (not in version control)
@@ -293,3 +296,9 @@ governance-tier3/
 - **A workflow application holds the agents' API keys.** It can act as any agent it has a key for, within that agent's role. It never holds an agent's private key.
 - **No streaming on the model path.** One gateway instance, one Tessera instance.
 - **Usage counters** (requests a minute, tokens a day) are kept in Valkey and reset with it.
+
+## Licence
+
+Copyright 2026 Christophe Hamchin. Licensed under the Apache License, Version 2.0: see `LICENSE`.
+
+The repository holds only the code written for this build. The third-party components it downloads keep their own licences, listed in `NOTICE`, with versions pinned in `versions.lock`.
