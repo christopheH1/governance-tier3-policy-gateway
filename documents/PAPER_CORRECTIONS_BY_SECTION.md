@@ -203,7 +203,7 @@ Chapters 2 to 5 were not available to review. Check them for the same terms, esp
 | 7.39 | External tools are simulated. The model adapter's egress is not restricted to the provider |
 | 7.40 | One real provider call was planned. Record its result, or state that provider calls were tested with a mock |
 | 7.41 | The registry is example data. Limits and budgets are illustrative |
-| 7.42 | Timescale: the paper says "6-week validation window". The build and tests took place on one day. Correct it |
+| 7.42 | Timescale: the paper says "6-week validation window". The build and tests took place on over 3 days. Correct it |
 
 ## 5. Terms to change throughout
 
