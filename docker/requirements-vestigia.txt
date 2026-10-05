@@ -1,0 +1,13 @@
+# API-only subset of vendor/ARTO/vestigia/requirements.txt, same pins.
+# Left out: streamlit, plotly, pandas (dashboard), psycopg2 (unused by the ledger),
+# opentelemetry (optional), test tools.
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+httpx==0.26.0
+python-dotenv==1.0.0
+redis==5.0.1
+watchdog==3.0.0
+cryptography==41.0.7
+PyJWT==2.8.0
+PyYAML==6.0.1

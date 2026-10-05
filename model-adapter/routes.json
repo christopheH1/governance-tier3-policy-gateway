@@ -1,0 +1,23 @@
+{
+  "claude-haiku": {
+    "model": "anthropic/claude-haiku-4-5-20251001",
+    "api_key_env": "ANTHROPIC_API_KEY"
+  },
+  "mock-model": {
+    "model": "openai/mock-model",
+    "mock_response": "This is a canned reply from the mock model. No provider was called."
+  },
+  "test-limited-model": {
+    "model": "openai/mock-model",
+    "mock_response": "This is a canned reply from the mock model. No provider was called."
+  },
+  "scripted-model": {
+    "scripted": true
+  },
+  "local-model": {
+    "local": true
+  },
+  "scripted-checker": {
+    "checker": true
+  }
+}

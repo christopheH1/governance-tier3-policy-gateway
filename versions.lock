@@ -1,0 +1,33 @@
+# Pinned versions for the policy gateway build. Recorded 4 October 2026.
+# Image digests are the multi-architecture manifest digests reported by Docker Hub.
+# Confirm on the build host with:  docker buildx imagetools inspect <image>:<tag>
+
+[in docker-compose.yaml]
+ARTO (Tessera, Vestigia)  git commit b57be5e787560d1e1531c7a30075c9cc681cea16  (1 October 2026, Apache-2.0)
+python:3.11-slim-bookworm sha256:0bee7276f83efd4a1ee05bbbf4281d95ed28e079220a9457f25a93e3f1e3c31b
+openpolicyagent/opa:1.19.1-static  sha256:32bf41d914b1505fea13303f60587cc57bdd2902262177585fb208f5dde76d32
+valkey/valkey:9.0.6-alpine         sha256:187679e3bd4036959631e3f03983ab2ba503ab21e6fd0454d508e909db2ee989
+Python packages                    docker/requirements-*.txt (ARTO's own pins, API subset; own services use the same versions)
+confirmed on the build host        valkey 9.0.6 reported by the Stage 1 acceptance test, 4 October 2026
+
+[patches to upstream code]
+p1  vestigia/api_server.py, one line: the API rate limit, fixed upstream at 10 requests a second with a
+    burst of 20, is read from VESTIGIA_RATE_LIMIT_RPS and VESTIGIA_RATE_LIMIT_BURST (same defaults).
+    Applied at image build by docker/patch_vestigia.py. vendor/ARTO stays unmodified.
+    Build setting: 200 a second, burst 400. Image tag: governance-tier3/vestigia:b57be5e-p1
+
+[model adapter]
+litellm==1.104.0 (MIT), library only. Full pinned set in docker/requirements-adapter.txt (63 packages).
+The proxy extra is not installed: it depends on litellm-enterprise, which is under a separate licence.
+Provider model: anthropic/claude-haiku-4-5-20251001, set in model-adapter/routes.json.
+
+[agents and console]
+Own code on the same pinned packages as the gateway (docker/requirements-services.txt). No new dependency.
+
+[workflows and local model]
+LangGraph 1.2.12, langchain-openai 1.6.7, langchain-mcp-adapters 0.3.2, mcp 1.30.0 (docker/requirements-workflow.txt, fully pinned)
+Ollama image ollama/ollama:0.35.1 (MIT). Not pulled during development. Default model llama3.2:3b
+
+[telemetry]
+otel/opentelemetry-collector-contrib:0.162.0  sha256:340885ab6f46822374f00c58c067396b53b8d612559842e8821585567579d9e3
+opentelemetry-sdk==1.45.0 and opentelemetry-exporter-otlp-proto-http==1.45.0 (Apache-2.0), in docker/requirements-services.txt

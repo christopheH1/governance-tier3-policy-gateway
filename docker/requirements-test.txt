@@ -1,0 +1,4 @@
+requests==2.31.0
+pyjwt==2.8.0
+cryptography==42.0.5
+redis==5.0.1

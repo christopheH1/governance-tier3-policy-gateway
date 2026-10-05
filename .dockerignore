@@ -1,0 +1,7 @@
+.env
+.git
+vendor/ARTO/.git
+vendor/ARTO/verityflux-v2
+vendor/ARTO/docs
+vendor/ARTO/cloud_eval
+**/__pycache__

@@ -1,0 +1,30 @@
+ Container governance-tier3-e2e-run-5ebf67e59b89 Creating 
+ Container governance-tier3-e2e-run-5ebf67e59b89 Created 
+[PASS] baseline: call is allowed with every dependency running  (HTTP 200)
+ Container governance-tier3-e2e-run-0612e5de0c92 Creating 
+ Container governance-tier3-e2e-run-0612e5de0c92 Created 
+[PASS] policy engine (OPA) stopped: call is denied and the tool is not reached  (HTTP 503, ['policy_engine_unavailable'])
+ Container governance-tier3-e2e-run-d12695e69318 Creating 
+ Container governance-tier3-e2e-run-d12695e69318 Created 
+[PASS] policy engine (OPA) restored: call is allowed again  (HTTP 200)
+ Container governance-tier3-e2e-run-a3cbdd2756ce Creating 
+ Container governance-tier3-e2e-run-a3cbdd2756ce Created 
+[PASS] identity service (Tessera) stopped: call is denied and the tool is not reached  (HTTP 503, ['identity_service_unavailable'])
+ Container governance-tier3-e2e-run-27e9b22141e2 Creating 
+ Container governance-tier3-e2e-run-27e9b22141e2 Created 
+[PASS] identity service (Tessera) restored: call is allowed again  (HTTP 200)
+ Container governance-tier3-e2e-run-8a6e05238335 Creating 
+ Container governance-tier3-e2e-run-8a6e05238335 Created 
+[PASS] audit ledger (Vestigia) stopped: call is denied and the tool is not reached  (HTTP 503, ['dependency_failure'])
+ Container governance-tier3-e2e-run-19529724cdcd Creating 
+ Container governance-tier3-e2e-run-19529724cdcd Created 
+[PASS] audit ledger (Vestigia) restored: call is allowed again  (HTTP 200)
+ Container governance-tier3-e2e-run-2b890d808bff Creating 
+ Container governance-tier3-e2e-run-2b890d808bff Created 
+[PASS] key-value store (Valkey) stopped: call is denied and the tool is not reached  (HTTP 503, ['state_store_unavailable'])
+ Container governance-tier3-e2e-run-6ba0d66e4da8 Creating 
+ Container governance-tier3-e2e-run-6ba0d66e4da8 Created 
+[PASS] key-value store (Valkey) restored: call is allowed again  (HTTP 200)
+
+9 of 9 checks passed
+fail-closed test passed

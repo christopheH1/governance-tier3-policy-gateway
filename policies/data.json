@@ -1,0 +1,196 @@
+{
+  "tier3": {
+    "_note": "Registry for the Research Operations scenario (analyst and report_writer), plus test entries. Tool destinations marked external are simulated by the mock tools service. Limits and budgets are examples. The data_processor, test_fixture and test_budget roles, test_short_hold, and test-limited-model exist only for the acceptance tests.",
+    "roles": {
+      "analyst": {
+        "tools": [
+          "database_read",
+          "file_read",
+          "api_call"
+        ],
+        "models": [
+          "claude-haiku",
+          "scripted-model",
+          "mock-model",
+          "local-model"
+        ],
+        "daily_token_budget": 200000
+      },
+      "report_writer": {
+        "tools": [
+          "report_generation",
+          "data_export"
+        ],
+        "models": [
+          "claude-haiku",
+          "scripted-model",
+          "local-model"
+        ],
+        "daily_token_budget": 200000
+      },
+      "data_processor": {
+        "tools": [
+          "database_read",
+          "data_export",
+          "report_generation"
+        ],
+        "models": [
+          "mock-model"
+        ],
+        "daily_token_budget": 100000
+      },
+      "test_fixture": {
+        "tools": [
+          "test_short_hold"
+        ],
+        "models": [
+          "test-limited-model",
+          "mock-model"
+        ],
+        "daily_token_budget": 100000
+      },
+      "test_budget": {
+        "tools": [],
+        "models": [
+          "mock-model"
+        ],
+        "daily_token_budget": 50
+      }
+    },
+    "purposes": {
+      "sales_reporting": {
+        "tools": [
+          "database_read",
+          "file_read"
+        ],
+        "description": "Reporting on the organisation's own sales figures and sales performance."
+      },
+      "market_research": {
+        "tools": [
+          "api_call",
+          "file_read"
+        ],
+        "description": "Researching markets, competitors and customers for the organisation."
+      },
+      "data_export": {
+        "tools": [
+          "database_read",
+          "data_export"
+        ],
+        "description": "Sending the organisation's datasets to an approved external recipient."
+      },
+      "report_writing": {
+        "tools": [
+          "report_generation"
+        ],
+        "description": "Writing business reports from the organisation's research and sales data."
+      },
+      "test_fixture": {
+        "tools": [
+          "test_short_hold"
+        ]
+      },
+      "report_delivery": {
+        "tools": [
+          "report_generation",
+          "data_export"
+        ],
+        "description": "Producing business reports from the organisation's research and sales data, and sending them to recipients."
+      },
+      "test_intent_check": {
+        "tools": [],
+        "description": "Answering questions about the weather forecast.",
+        "check_model": "scripted-checker"
+      }
+    },
+    "tools": {
+      "database_read": {
+        "class": "reversible_read",
+        "location": "internal",
+        "destination": "http://mock-tools:8000/database/read"
+      },
+      "file_read": {
+        "class": "reversible_read",
+        "location": "internal",
+        "destination": "http://mock-tools:8000/file/read"
+      },
+      "api_call": {
+        "class": "reversible_read",
+        "location": "external",
+        "destination": "http://mock-tools:8000/external/api"
+      },
+      "report_generation": {
+        "class": "write",
+        "location": "internal",
+        "destination": "http://mock-tools:8000/report"
+      },
+      "data_export": {
+        "class": "export",
+        "location": "external",
+        "destination": "http://mock-tools:8000/external/export"
+      },
+      "database_delete": {
+        "class": "delete",
+        "location": "internal",
+        "destination": "http://mock-tools:8000/database/delete"
+      },
+      "test_short_hold": {
+        "class": "write",
+        "location": "internal",
+        "destination": "http://mock-tools:8000/test/short-hold",
+        "hold_timeout_seconds": 3
+      }
+    },
+    "models": {
+      "claude-haiku": {
+        "provider": "anthropic",
+        "location": "external",
+        "max_tokens": 1024,
+        "rate_per_minute": 30
+      },
+      "mock-model": {
+        "provider": "mock",
+        "location": "internal",
+        "max_tokens": 512,
+        "rate_per_minute": 600
+      },
+      "test-limited-model": {
+        "provider": "mock",
+        "location": "internal",
+        "max_tokens": 64,
+        "rate_per_minute": 3
+      },
+      "scripted-model": {
+        "provider": "mock",
+        "location": "internal",
+        "max_tokens": 512,
+        "rate_per_minute": 600
+      },
+      "local-model": {
+        "provider": "ollama",
+        "location": "internal",
+        "max_tokens": 1024,
+        "rate_per_minute": 60
+      },
+      "scripted-checker": {
+        "provider": "mock",
+        "location": "internal",
+        "max_tokens": 64,
+        "rate_per_minute": 600
+      }
+    },
+    "referral": {
+      "tools": [
+        "data_export",
+        "database_delete",
+        "test_short_hold"
+      ],
+      "max_rows": 10000,
+      "hold_timeout_seconds": 900
+    },
+    "intent_check": {
+      "enabled": true,
+      "record_flagged_text": true
+    }
+  }
+}

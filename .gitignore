@@ -1,0 +1,4 @@
+.env
+vendor/
+results/
+__pycache__/

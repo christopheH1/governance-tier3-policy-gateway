@@ -1,0 +1,127 @@
+{
+  "_note": "The Research Operations scenario from Chapter 6, without delegation: two agents with separate roles. Each agent knows more tools than its role allows, on purpose, so the controls can be seen at work.",
+  "agents": [
+    {
+      "id": "data-analyst-01",
+      "name": "Data analyst",
+      "role": "analyst",
+      "purposes": [
+        "sales_reporting",
+        "market_research"
+      ],
+      "models": [
+        "scripted-model",
+        "local-model",
+        "claude-haiku"
+      ],
+      "brief": "You are the data analyst of a research operations team. Use the tools you are given to gather the figures the task needs, then answer briefly with what you found.",
+      "tools": [
+        "database_read",
+        "file_read",
+        "data_export"
+      ]
+    },
+    {
+      "id": "report-writer-01",
+      "name": "Report writer",
+      "role": "report_writer",
+      "purposes": [
+        "report_delivery",
+        "report_writing"
+      ],
+      "models": [
+        "scripted-model",
+        "local-model",
+        "claude-haiku"
+      ],
+      "brief": "You are the report writer of a research operations team. Use the tools you are given to produce the report and send it out, then confirm briefly what you did.",
+      "tools": [
+        "report_generation",
+        "data_export",
+        "database_delete"
+      ]
+    }
+  ],
+  "tool_definitions": {
+    "database_read": {
+      "description": "Read rows from an internal database table.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum rows to return"
+          }
+        },
+        "required": [
+          "table"
+        ]
+      }
+    },
+    "file_read": {
+      "description": "Read an internal file.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "report_generation": {
+      "description": "Create a report document from a title and a summary.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    },
+    "data_export": {
+      "description": "Send a dataset or report to an external recipient.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dataset": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset"
+        ]
+      }
+    },
+    "database_delete": {
+      "description": "Delete rows from an internal database table.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "table"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Research Operations agent console</title>
+<style>
+  :root {
+    --ink: #1c2430; --soft: #56616f; --ground: #eef1f4; --panel: #ffffff; --line: #cbd3dc;
+    --allow: #1f7a4d; --deny: #b3261e; --hold: #8a5a00; --flag: #2b5fa8;
+    --hold-wash: #fff6df;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink);
+         font: 16px/1.5 "Segoe UI", "Noto Sans", "Helvetica Neue", Arial, sans-serif; }
+  header { background: var(--ink); color: #fff; padding: 18px 28px; display: flex; gap: 16px;
+           align-items: baseline; flex-wrap: wrap; }
+  header h1 { font-size: 21px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: #b9c3cf; font-size: 14px; }
+  header .who { margin-left: auto; }
+  main { max-width: 1240px; margin: 0 auto; padding: 24px 28px 60px; }
+  h2 { font-size: 18px; font-weight: 600; margin: 0 0 12px; }
+  h3 { font-size: 15px; font-weight: 600; margin: 0; }
+  .columns { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: 28px; align-items: start; }
+  @media (max-width: 860px) { .columns { grid-template-columns: 1fr; } main { padding: 18px 16px 48px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 20px; margin-bottom: 20px; }
+  label { display: block; font-size: 14px; color: var(--soft); margin: 12px 0 4px; }
+  select, textarea, input[type=text] { width: 100%; font: inherit; color: inherit; padding: 8px 10px;
+        border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  textarea { min-height: 84px; resize: vertical; }
+  button { font: inherit; font-weight: 600; border: 1px solid var(--ink); background: var(--ink); color: #fff;
+           padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+  button.quiet { background: #fff; color: var(--ink); }
+  button.approve { background: var(--allow); border-color: var(--allow); }
+  button.reject { background: #fff; color: var(--deny); border-color: var(--deny); }
+  button:disabled { opacity: .45; cursor: default; }
+  :focus-visible { outline: 3px solid var(--flag); outline-offset: 2px; }
+  .hint { font-size: 14px; color: var(--soft); margin: 8px 0 0; }
+  .problem { background: #fdecea; border: 1px solid var(--deny); color: #6b1712; padding: 10px 14px;
+             border-radius: 4px; margin-bottom: 16px; }
+
+  /* The review band: only present when a call is waiting for a person. */
+  #review { background: var(--hold-wash); border: 2px solid var(--hold); border-radius: 6px; padding: 18px 20px; margin-bottom: 24px; }
+  #review h2 { color: #5c3c00; }
+  .held { border-top: 1px solid #e3c98a; padding: 14px 0 4px; display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: start; }
+  .held:first-of-type { border-top: 0; padding-top: 0; }
+  .held .actions { display: flex; gap: 8px; }
+  .held dl { margin: 6px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 14px; }
+  .held dt { color: var(--soft); } .held dd { margin: 0; overflow-wrap: anywhere; }
+  .held > * { min-width: 0; }
+  @media (max-width: 860px) {
+    .held { grid-template-columns: 1fr; }
+    .held dl { grid-template-columns: 1fr; gap: 0; } .held dd { margin-bottom: 8px; }
+  }
+
+  /* The stamp: how every decision of the gateway is shown. */
+  .stamp { display: inline-block; font-size: 13px; font-weight: 700; padding: 1px 9px; border: 2px solid currentColor;
+           border-radius: 3px; transform: rotate(-2deg); background: #fff; white-space: nowrap; }
+  .stamp.allow { color: var(--allow); } .stamp.deny { color: var(--deny); }
+  .stamp.hold { color: var(--hold); background: var(--hold-wash); } .stamp.flag { color: var(--flag); }
+
+  .agent { border-top: 1px solid var(--line); padding: 12px 0; }
+  .agent:first-of-type { border-top: 0; padding-top: 0; }
+  .agent p { margin: 2px 0 0; font-size: 14px; color: var(--soft); }
+  .status { font-size: 14px; font-weight: 600; }
+  .status.yes { color: var(--allow); } .status.no { color: var(--hold); }
+
+  ol.steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+  ol.steps li { counter-increment: step; position: relative; padding: 0 0 18px 44px; }
+  ol.steps li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 28px; height: 28px;
+        border-radius: 50%; border: 1px solid var(--line); background: var(--ground); font-size: 13px; font-weight: 600;
+        display: flex; align-items: center; justify-content: center; }
+  ol.steps li::after { content: ""; position: absolute; left: 14px; top: 30px; bottom: 2px; width: 1px; background: var(--line); }
+  ol.steps li:last-child::after { display: none; }
+  .step-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .step-head .what { font-weight: 600; }
+  .step-head .kind { color: var(--soft); font-size: 14px; }
+  .step-body { font-size: 14px; margin-top: 4px; overflow-wrap: anywhere; }
+  .step-body p { margin: 2px 0; }
+  .step-body .label { color: var(--soft); }
+  .said { border-left: 4px solid var(--line); padding: 6px 12px; white-space: pre-wrap; }
+  .said.person { border-left-color: var(--flag); }
+  .answer { border-left: 4px solid var(--ink); background: var(--ground); padding: 12px 14px; margin-top: 6px; white-space: pre-wrap; }
+  .runhead { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; margin-bottom: 14px; }
+  .runhead .state { font-size: 14px; font-weight: 600; color: var(--soft); }
+  .runs button { display: block; width: 100%; text-align: left; background: #fff; color: var(--ink); font-weight: 400;
+        border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 10px 0; }
+  .runs button:first-child { border-top: 0; }
+  .runs .meta { font-size: 13px; color: var(--soft); display: block; }
+  .empty { color: var(--soft); margin: 0; }
+  @media (prefers-reduced-motion: no-preference) { .stamp.hold { animation: wait 1.6s ease-in-out infinite; } }
+  @keyframes wait { 50% { opacity: .55; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Research Operations agent console</h1>
+  <p>Every model call and tool call below went through the policy gateway.</p>
+  <p class="who" id="who"></p>
+</header>
+<main>
+  <div id="problems"></div>
+  <div id="review" hidden></div>
+  <div class="columns">
+    <div>
+      <section>
+        <h2>Give an agent a task</h2>
+        <form id="task-form">
+          <label for="agent">Agent</label>
+          <select id="agent"></select>
+          <label for="purpose">Purpose of the task</label>
+          <select id="purpose"></select>
+          <label for="model">Model</label>
+          <select id="model"></select>
+          <label for="task">Task</label>
+          <textarea id="task">Report the Q4 sales figures by region.</textarea>
+          <p class="hint" id="model-hint"></p>
+          <p style="margin: 14px 0 0"><button type="submit" id="start">Start the task</button></p>
+          <p class="hint" id="form-message" role="status"></p>
+        </form>
+      </section>
+      <section>
+        <h2>Agents</h2>
+        <div id="agents"><p class="empty">Loading the agents.</p></div>
+        <p style="margin: 14px 0 0"><button class="quiet" id="enrol">Enrol the agents</button></p>
+        <p class="hint">Enrolling registers each agent's public key and role, so it can be issued tokens.
+          It is safe to repeat.</p>
+      </section>
+    </div>
+    <div>
+      <section>
+        <div id="run"><h2>What the agent did</h2><p class="empty">Start a task to watch an agent work, step by step.</p></div>
+      </section>
+      <section>
+        <h2>Recent tasks</h2>
+        <div class="runs" id="runs"><p class="empty">No task has been started yet.</p></div>
+      </section>
+      <section>
+        <h2>Calls that ran and were flagged</h2>
+        <div id="flags"><p class="empty">Nothing has been flagged.</p></div>
+      </section>
+    </div>
+  </div>
+</main>
+<script>
+"use strict";
+const STAMPS = { allow: "allowed", deny: "denied", hold: "held for review", flag: "allowed and flagged" };
+const PURPOSES = { sales_reporting: "Sales reporting", market_research: "Market research",
+                   report_delivery: "Deliver a report", report_writing: "Write a report" };
+let overview = null, selectedRun = null, deciding = new Set(), replyDrafts = {}, drawn = "";
+
+function el(tag, attributes, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attributes || {})) {
+    if (key === "class") node.className = value; else if (key === "text") node.textContent = value;
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value); else node.setAttribute(key, value);
+  }
+  for (const child of children) if (child != null) node.append(child);
+  return node;
+}
+const stamp = outcome => el("span", { class: "stamp " + outcome, text: STAMPS[outcome] || outcome });
+const words = reasons => (reasons || []).map(reason => reason.replaceAll("_", " ")).join(", ");
+const clock = seconds => new Date(seconds * 1000).toLocaleTimeString("en-GB");
+const compact = value => { const text = JSON.stringify(value); return text.length > 320 ? text.slice(0, 320) + " ..." : text; };
+
+async function api(path, body) {
+  const options = body === undefined ? {} : { method: "POST", body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json", "X-Console": "1" } };
+  const response = await fetch(path, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.detail || "The request failed (" + response.status + ").");
+  return data;
+}
+
+function line(label, value) {
+  return el("p", {}, el("span", { class: "label", text: label + " " }), document.createTextNode(value));
+}
+
+function renderAgents() {
+  const box = document.getElementById("agents"); box.replaceChildren();
+  for (const agent of overview.agents) {
+    box.append(el("div", { class: "agent" },
+      el("h3", { text: agent.name }),
+      el("p", { text: "Role: " + agent.role.replaceAll("_", " ") + ". Knows the tools " + agent.tools.join(", ") + "." }),
+      el("p", { class: "status " + (agent.enrolled ? "yes" : "no"),
+                text: agent.enrolled ? "Enrolled. May be issued tokens for: " + agent.allowed_tools.join(", ") + "."
+                                     : "Not enrolled in this session. It cannot get tokens until it is." })));
+  }
+  const select = document.getElementById("agent");
+  if (select.options.length !== overview.agents.length) {
+    select.replaceChildren(...overview.agents.map(agent => el("option", { value: agent.id, text: agent.name })));
+    fillChoices();
+  }
+}
+
+function fillChoices() {
+  const agent = overview.agents.find(a => a.id === document.getElementById("agent").value);
+  if (!agent) return;
+  document.getElementById("purpose").replaceChildren(
+    ...agent.purposes.map(p => el("option", { value: p, text: PURPOSES[p] || p })));
+  document.getElementById("model").replaceChildren(...agent.models.map(m => el("option", { value: m, text: m })));
+  modelHint();
+}
+function modelHint() {
+  const scripted = document.getElementById("model").value === "scripted-model";
+  document.getElementById("model-hint").textContent = scripted
+    ? "The scripted model is a stand-in: it calls each tool it is offered once, whatever the task says. It needs no provider key."
+    : document.getElementById("model").value === "local-model"
+      ? "This model runs inside the organisation, on Ollama. Nothing leaves. It needs the workflow profile running."
+      : "This model is an external provider. The task text leaves the organisation.";
+}
+
+function renderReview() {
+  const band = document.getElementById("review");
+  if (!overview.holds.length) { band.hidden = true; band.replaceChildren(); return; }
+  band.hidden = false;
+  const count = overview.holds.length;
+  band.replaceChildren(el("h2", { text: count === 1 ? "One call is waiting for your decision"
+                                                   : count + " calls are waiting for your decision" }));
+  for (const hold of overview.holds) {
+    const busy = deciding.has(hold.hold_reference);
+    const decide = approve => async () => {
+      deciding.add(hold.hold_reference); renderReview();
+      try { await api("/api/holds/" + hold.hold_reference + "/decision", { approve }); }
+      catch (error) { alert(error.message); }
+      deciding.delete(hold.hold_reference); refresh();
+    };
+    band.append(el("div", { class: "held" },
+      el("div", {},
+        el("h3", { text: hold.agent_id + " wants to use " + hold.tool }),
+        el("dl", {},
+          el("dt", { text: "With" }), el("dd", { text: compact(hold.params) }),
+          el("dt", { text: "Purpose" }), el("dd", { text: (PURPOSES[hold.intent.purpose] || hold.intent.purpose || "not stated") +
+              (hold.intent.statement ? ": " + hold.intent.statement : "") }),
+          el("dt", { text: "Asked by" }), el("dd", { text: hold.intent.on_behalf_of || "not recorded" }),
+          el("dt", { text: "Held because" }), el("dd", { text: words(hold.reasons) }),
+          el("dt", { text: "Denied if unanswered by" }), el("dd", { text: clock(hold.expires_at) }))),
+      el("div", { class: "actions" },
+        el("button", { class: "approve", onclick: decide(true), ...(busy ? { disabled: "" } : {}) }, "Approve"),
+        el("button", { class: "reject", onclick: decide(false), ...(busy ? { disabled: "" } : {}) }, "Reject"))));
+  }
+}
+
+function renderStep(step) {
+  const body = el("div", { class: "step-body" });
+  if (step.kind === "model") {
+    if (step.tools_offered) body.append(line("Tools the model was shown:", step.tools_offered.join(", ") || "none"));
+    if (step.tools_removed) body.append(line("Tools the gateway removed first:", step.tools_removed.join(", ")));
+    if (step.proposed) body.append(line("The model asked to use:", step.proposed.join(", ")));
+    if (step.tokens) body.append(line("Tokens used:", String(step.tokens)));
+  } else if (step.kind === "agent" || step.kind === "person") {
+    body.append(el("div", { class: step.kind === "person" ? "said person" : "said", text: step.text || "" }));
+  } else {
+    if (step.params) body.append(line("With:", compact(step.params)));
+    if (step.result !== undefined) body.append(line("Returned:", compact(step.result)));
+  }
+  if (step.reasons) body.append(line("Reason:", words(step.reasons)));
+  if (step.note) body.append(line("Note:", step.note));
+  if (step.trace_id) body.append(line("Trace:", step.trace_id));
+  return el("li", {},
+    el("div", { class: "step-head" },
+      el("span", { class: "what", text: step.title }),
+      el("span", { class: "kind", text: step.kind === "model" ? "model call" : step.kind === "tool" ? "tool call" : "" }),
+      step.outcome ? stamp(step.outcome) : null,
+      el("span", { class: "kind", text: clock(step.at) })),
+    body);
+}
+
+function renderRun(run) {
+  const box = document.getElementById("run");
+  const state = [run.id, run.status, run.steps.length, run.answer ? 1 : 0,
+                 run.steps.map(step => step.outcome + (step.note || "")).join()].join("|");
+  if (state === drawn) return;      // nothing changed: leave the page alone, so a reply being typed is not disturbed
+  drawn = state;
+  box.replaceChildren(el("h2", { text: "What the agent did" }),
+    el("div", { class: "runhead" },
+      el("h3", { text: run.agent_name + ": " + run.task }),
+      el("span", { class: "state", text: "Started by " + (run.requested_by || "a workflow") + ". Status: " + run.status })),
+    el("ol", { class: "steps" }, ...run.steps.map(renderStep)));
+  if (run.answer) box.append(el("h3", { text: "The agent's answer" }), el("div", { class: "answer", text: run.answer }));
+  if (run.can_reply && run.status === "finished") {
+    const text = el("textarea", { id: "reply-text", rows: "3", maxlength: "2000", "aria-label": "Your reply to the agent" });
+    text.value = replyDrafts[run.id] || "";
+    text.addEventListener("input", () => { replyDrafts[run.id] = text.value; });
+    const note = el("p", { class: "hint" });
+    const send = el("button", { onclick: async () => {
+      if (!text.value.trim()) { note.textContent = "Type a reply first."; return; }
+      send.disabled = true;
+      try { await api("/api/runs/" + run.id + "/reply", { text: text.value.trim() }); delete replyDrafts[run.id]; refresh(); }
+      catch (error) { note.textContent = error.message; send.disabled = false; }
+    } }, "Send reply");
+    box.append(el("h3", { text: "Reply to the agent", style: "margin: 18px 0 6px" }), text,
+      el("p", { class: "hint", text: "Your reply goes to the model through the policy gateway, as part of the same task." }),
+      send, note);
+  }
+}
+
+function renderRuns() {
+  const box = document.getElementById("runs");
+  if (!overview.runs.length) return;
+  box.replaceChildren(...overview.runs.slice(0, 10).map(run =>
+    el("button", { onclick: () => { selectedRun = run.id; refresh(); } },
+      document.createTextNode(run.agent_name + ": " + run.task),
+      el("span", { class: "meta", text: clock(run.started_at) + ", " + run.status + ", " + run.model }))));
+}
+
+function renderFlags() {
+  const box = document.getElementById("flags");
+  if (!overview.flags.length) return;
+  box.replaceChildren(...overview.flags.map(flag => el("p", { style: "margin: 0 0 6px; font-size: 14px" },
+    stamp("flag"), document.createTextNode(flag.kind === "intent"
+      ? "  " + flag.agent_id + (flag.on_behalf_of ? ", on behalf of " + flag.on_behalf_of + "," : "") + " at " + clock(flag.at) + ": a request may not fit the purpose \u201c" +
+        (PURPOSES[flag.purpose] || flag.purpose) + "\u201d. The checker (" + flag.checked_by + ") said: " + flag.detail +
+        " Task " + flag.task_id + "." + (flag.request ? " The request was: \u201c" + flag.request + "\u201d" : "")
+      : "  " + flag.agent_id + (flag.on_behalf_of ? ", on behalf of " + flag.on_behalf_of + "," : "") + " used " + flag.tool + " at " + clock(flag.at) + " (" + words(flag.reasons) + ")"))));
+}
+
+async function refresh() {
+  try {
+    overview = await api("/api/overview");
+    document.getElementById("who").textContent = "Signed in as " + overview.person + " (" + (overview.roles || []).join(", ") + ")";
+    document.getElementById("problems").replaceChildren(
+      ...overview.problems.map(text => el("div", { class: "problem", text })));
+    renderAgents(); renderReview(); renderRuns(); renderFlags();
+    if (selectedRun) renderRun(await api("/api/runs/" + selectedRun));
+  } catch (error) {
+    document.getElementById("problems").replaceChildren(el("div", { class: "problem", text: error.message }));
+  }
+}
+
+document.getElementById("agent").addEventListener("change", fillChoices);
+document.getElementById("model").addEventListener("change", modelHint);
+document.getElementById("enrol").addEventListener("click", async event => {
+  event.target.disabled = true;
+  try { await api("/api/enrol", {}); } catch (error) { alert(error.message); }
+  event.target.disabled = false; refresh();
+});
+document.getElementById("task-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const message = document.getElementById("form-message");
+  try {
+    const run = await api("/api/runs", { agent_id: document.getElementById("agent").value,
+      purpose: document.getElementById("purpose").value, model: document.getElementById("model").value,
+      task: document.getElementById("task").value });
+    selectedRun = run.id; message.textContent = "Task started."; refresh();
+  } catch (error) { message.textContent = error.message; }
+});
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

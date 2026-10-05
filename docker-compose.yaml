@@ -1,0 +1,511 @@
+# Policy gateway build, Stage 6: tool path, model path, telemetry, agents, console, a workflow
+# written in LangGraph, a local model for agents, and a checking model for the control plane (both Ollama).
+#
+#   agents network    agents reach the policy gateway and the provisioner, and nothing else
+#   control network   identity, policy, audit, state, and the checking model: reachable by the gateway and the provisioner only
+#   tools network     the tools themselves: reachable by the gateway only
+#   models network    the model adapter: reachable by the gateway only
+#   egress network    the one route out, attached to the model adapter only
+#   ui network        carries the console's published port, with outbound traffic switched off
+#
+# Every network except egress and ui is internal. One port is published, to this machine only:
+# the console at http://127.0.0.1:8088
+# Tests run from containers:
+#   docker compose --profile test run --rm e2e            (tool path acceptance test)
+#   docker compose --profile test run --rm e2e python e2e_models.py   (model path acceptance test)
+#   docker compose --profile test run --rm e2e python e2e_agents.py   (agents, through the console)
+#   docker compose --profile test run --rm e2e python e2e_bridge.py   (the bridge a workflow application uses)
+#   docker compose --profile test run --rm ledger-verify  (independent check of the audit ledger)
+#   docker compose --profile test run --rm telemetry-show (what the collector has recorded)
+#   docker compose --profile test run --rm agent-probe    (network isolation, as an agent)
+#   docker compose --profile test run --rm test-runner    (Stage 1 foundation test)
+#   ./scripts/failclosed-test.sh                          (stops each dependency in turn)
+
+name: governance-tier3
+
+x-hardening: &hardening
+  restart: unless-stopped
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 256
+
+x-test: &test
+  profiles: [test]
+  image: governance-tier3/test-runner:stage2
+  build:
+    context: .
+    dockerfile: docker/test-runner.Dockerfile
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  # --- control plane ---------------------------------------------------------
+  valkey:
+    <<: *hardening
+    image: valkey/valkey:9.0.6-alpine@sha256:187679e3bd4036959631e3f03983ab2ba503ab21e6fd0454d508e909db2ee989
+    command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD:?run scripts/gen-secrets.sh}", "--appendonly", "yes"]
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD}
+    cap_add: [SETGID, SETUID, CHOWN, DAC_OVERRIDE]   # entrypoint drops from root to the valkey user
+    networks: [control]
+    volumes:
+      - valkey-data:/data
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli --no-auth-warning -a \"$$VALKEY_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  opa:
+    <<: *hardening
+    image: openpolicyagent/opa:1.19.1-static@sha256:32bf41d914b1505fea13303f60587cc57bdd2902262177585fb208f5dde76d32
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - --set=decision_logs.console=true
+      - --ignore=*_test.rego
+      - /policies
+    read_only: true
+    networks: [control]
+    volumes:
+      - ./policies:/policies:ro
+    mem_limit: 256m
+    # The static image has no shell, so there is no container healthcheck.
+
+  vestigia:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: docker/vestigia.Dockerfile
+    image: governance-tier3/vestigia:b57be5e-p1
+    environment:
+      VESTIGIA_PORT: "8002"
+      VESTIGIA_MODE: production
+      VESTIGIA_API_KEY: ${VESTIGIA_API_KEY:?run scripts/gen-secrets.sh}
+      VESTIGIA_SECRET_SALT: ${VESTIGIA_SECRET_SALT:?run scripts/gen-secrets.sh}
+      VESTIGIA_FAIL_CLOSED: "true"          # refuse service if the API key is ever missing
+      # Added by docker/patch_vestigia.py. Upstream fixes these at 10 and 20.
+      VESTIGIA_RATE_LIMIT_RPS: "${VESTIGIA_RATE_LIMIT_RPS:-200}"
+      VESTIGIA_RATE_LIMIT_BURST: "${VESTIGIA_RATE_LIMIT_BURST:-400}"
+      MLRT_INTEGRATION_ENABLED: "false"
+    networks: [control]
+    volumes:
+      - vestigia-data:/srv/vestigia/data
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  tessera:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: docker/tessera.Dockerfile
+    image: governance-tier3/tessera:b57be5e
+    environment:
+      TESSERA_PORT: "8001"
+      # Strict mode: refuses to start on a missing secret or the public development key.
+      TESSERA_ENV: production
+      MLRT_MODE: prod
+      SUITE_STRICT_MODE: "true"
+      TESSERA_SECRET_KEY: ${TESSERA_SECRET_KEY:?run scripts/gen-secrets.sh}
+      TESSERA_ADMIN_KEY: ${TESSERA_ADMIN_KEY:?run scripts/gen-secrets.sh}
+      # Off by default upstream. Without it anyone on the network can register agents and mint tokens.
+      TESSERA_REQUIRE_REGISTRATION_AUTH: "true"
+      TESSERA_REQUIRE_DPOP: "true"
+      # Agents hold their own keys. The server neither returns, stores, nor signs with them.
+      TESSERA_RETURN_PRIVATE_KEYS: "false"
+      TESSERA_STORE_PRIVATE_KEYS: "false"
+      TESSERA_ALLOW_SERVER_SIGNING: "false"
+      # The gateway writes audit entries itself. Tessera's own forwarding fails open, so it stays off.
+      MLRT_INTEGRATION_ENABLED: "false"
+      REDIS_URL: redis://:${VALKEY_PASSWORD}@valkey:6379/0
+    networks: [control]
+    volumes:
+      - tessera-data:/srv/tessera/data
+      - tessera-state:/srv/tessera/shared_state
+    depends_on:
+      valkey:
+        condition: service_healthy
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  otel-collector:   # Observability Plane: traces and metrics from the gateway, written to a volume
+    <<: *hardening
+    image: otel/opentelemetry-collector-contrib:0.162.0@sha256:340885ab6f46822374f00c58c067396b53b8d612559842e8821585567579d9e3
+    command: ["--config=/etc/otelcol/config.yaml"]
+    user: "0:0"          # the image has no shell to prepare the volume, so it writes as root, with every capability dropped
+    environment:
+      TELEMETRY_DIR: /telemetry
+    read_only: true
+    networks: [control]
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - telemetry-data:/telemetry
+    mem_limit: 300m
+    # The image has no shell, so there is no container healthcheck.
+
+  # --- services agents may reach ---------------------------------------------
+  provisioner:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        APP_DIR: provisioner
+    image: governance-tier3/provisioner:stage2
+    environment:
+      PORT: "9080"
+      PROVISIONER_PUBLIC_URL: http://provisioner:9080
+      PROVISIONER_OPERATOR_KEY: ${PROVISIONER_OPERATOR_KEY:?run scripts/gen-secrets.sh}
+      TOKEN_TTL_MINUTES: "15"
+      TESSERA_URL: http://tessera:8001
+      TESSERA_ADMIN_KEY: ${TESSERA_ADMIN_KEY}     # the only service that holds it
+      OPA_URL: http://opa:8181
+      VESTIGIA_URL: http://vestigia:8002
+      VESTIGIA_API_KEY: ${VESTIGIA_API_KEY}
+      VALKEY_URL: redis://:${VALKEY_PASSWORD}@valkey:6379/1
+    networks: [agents, control]
+    read_only: true
+    tmpfs: [/tmp]
+    depends_on:
+      tessera: {condition: service_healthy}
+      vestigia: {condition: service_healthy}
+      valkey: {condition: service_healthy}
+      opa: {condition: service_started}
+    mem_limit: 256m
+    healthcheck: &svc-health
+      test: ["CMD-SHELL", "python -c \"import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:'+os.environ['PORT']+'/health', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  policy-gateway:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        APP_DIR: gateway
+    image: governance-tier3/policy-gateway:stage2
+    environment:
+      PORT: "9090"
+      GATEWAY_PUBLIC_URL: http://policy-gateway:9090
+      GATEWAY_REVIEWER_KEY: ${GATEWAY_REVIEWER_KEY:?run scripts/gen-secrets.sh}
+      HOLD_SWEEP_SECONDS: "2"
+      TESSERA_URL: http://tessera:8001            # validation only: the gateway has no admin key
+      OPA_URL: http://opa:8181
+      VESTIGIA_URL: http://vestigia:8002
+      VESTIGIA_API_KEY: ${VESTIGIA_API_KEY}
+      VALKEY_URL: redis://:${VALKEY_PASSWORD}@valkey:6379/2
+      MODEL_ADAPTER_URL: http://model-adapter:4000
+      # Telemetry fails open: the gateway does not wait for the collector and carries on without it.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      MODEL_ADAPTER_KEY: ${MODEL_ADAPTER_KEY:?run scripts/gen-secrets.sh}
+      CHECKER_URL: http://ollama-checker:11434       # the control plane's own model, for the purpose-fit check
+      CHECKER_MODEL: ${CHECKER_MODEL:-llama3.2:3b}
+      REVIEW_FOUR_EYES: ${REVIEW_FOUR_EYES:-false}   # true: nobody may approve a call made on their own behalf
+    networks: [agents, control, tools, models]
+    read_only: true
+    tmpfs: [/tmp]
+    depends_on:
+      tessera: {condition: service_healthy}
+      model-adapter: {condition: service_healthy}
+      vestigia: {condition: service_healthy}
+      valkey: {condition: service_healthy}
+      opa: {condition: service_started}
+    mem_limit: 256m
+    healthcheck: *svc-health
+
+  # --- agents and the people who direct them -----------------------------------
+  agent-runtime:   # hosts the agents. Holds their private keys and nothing else
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        APP_DIR: agent-runtime
+    image: governance-tier3/agent-runtime:stage6
+    environment:
+      PORT: "9070"
+      GATEWAY_URL: http://policy-gateway:9090
+      PROVISIONER_URL: http://provisioner:9080
+      AGENT_RUNTIME_KEY: ${AGENT_RUNTIME_KEY:?run scripts/gen-secrets.sh}
+      BRIDGE_SECRET: ${BRIDGE_SECRET:?run scripts/gen-secrets.sh}     # the agents' API keys are derived from it
+      AGENT_KEY_DIR: /keys
+    networks: [agents]
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      - agent-keys:/keys
+    depends_on:
+      policy-gateway: {condition: service_healthy}
+      provisioner: {condition: service_healthy}
+    mem_limit: 256m
+    healthcheck: *svc-health
+
+  console:   # the web page for the operator and the reviewer. Holds their credentials, and no agent key
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        APP_DIR: console
+    image: governance-tier3/console:stage6
+    environment:
+      PORT: "8088"
+      # People sign in with their own accounts (scripts/console-user.sh). The password below is for the
+      # automated tests' accounts only, which exist while CONSOLE_TEST_ACCOUNTS is true. Set it to false
+      # in .env once testing is done.
+      CONSOLE_TEST_ACCOUNTS: ${CONSOLE_TEST_ACCOUNTS:-true}
+      CONSOLE_PASSWORD: ${CONSOLE_PASSWORD:?run scripts/gen-secrets.sh}
+      CONSOLE_USERS_FILE: /keys/users.json
+      GATEWAY_URL: http://policy-gateway:9090
+      PROVISIONER_URL: http://provisioner:9080
+      AGENT_RUNTIME_URL: http://agent-runtime:9070
+      AGENT_RUNTIME_KEY: ${AGENT_RUNTIME_KEY}
+      PROVISIONER_OPERATOR_KEY: ${PROVISIONER_OPERATOR_KEY}
+      GATEWAY_REVIEWER_KEY: ${GATEWAY_REVIEWER_KEY}
+    networks: [agents, ui]
+    ports:
+      - "127.0.0.1:8088:8088"     # this machine only
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      - console-accounts:/keys     # the accounts file: names, password hashes, roles
+    depends_on:
+      agent-runtime: {condition: service_healthy}
+    mem_limit: 256m
+    healthcheck: *svc-health
+
+  # --- model path --------------------------------------------------------------
+  model-adapter:   # the only container with a route to the outside, and the only holder of provider keys
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        APP_DIR: model-adapter
+        REQUIREMENTS: requirements-adapter.txt
+    image: governance-tier3/model-adapter:stage6
+    environment:
+      PORT: "4000"
+      HOME: /tmp
+      MODEL_ADAPTER_KEY: ${MODEL_ADAPTER_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+    networks: [models, egress]
+    tmpfs: [/tmp]
+    mem_limit: 512m
+    healthcheck: *svc-health
+
+  # --- the control plane's own model (profile: checker) --------------------------
+  ollama-checker:   # judges whether a request fits its declared purpose. On the control network only:
+    profiles: [checker, workflow]   # agents cannot reach it, and it is separate from the model agents use
+    image: ollama/ollama:0.35.1
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    networks: [control]
+    volumes:
+      - ollama-checker-data:/root/.ollama
+
+  ollama-checker-seed:   # one-off: copies the model already downloaded for agents. No network at all
+    profiles: [setup]
+    image: ollama/ollama:0.35.1
+    entrypoint: ["/bin/sh", "-c", "cp -a /from/. /root/.ollama/ && echo 'checker model copied:' && (ls /root/.ollama/models/manifests/registry.ollama.ai/library 2>/dev/null || true)"]
+    network_mode: none
+    volumes:
+      - ollama-data:/from:ro
+      - ollama-checker-data:/root/.ollama
+
+  ollama-checker-pull:   # one-off alternative: downloads a model for the checker, for when it should differ from the agents'
+    profiles: [setup]
+    image: ollama/ollama:0.35.1
+    entrypoint: ["/bin/sh", "-c", "ollama serve >/dev/null 2>&1 & sleep 4; ollama pull ${CHECKER_MODEL:-llama3.2:3b}"]
+    networks: [egress]
+    volumes:
+      - ollama-checker-data:/root/.ollama
+
+  # --- the agents' local model and the LangGraph workflow (profile: workflow) -----
+  workflow:   # the LangGraph workflow, run on demand. It holds the agents' API keys and no private key
+    profiles: [cli]              # never started by 'up': use 'docker compose run --rm workflow ...'
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        APP_DIR: workflows
+        REQUIREMENTS: requirements-workflow.txt
+    image: governance-tier3/workflow:stage6
+    command: ["python", "research_ops.py", "--help"]
+    environment: &workflow-env
+      HOME: /tmp
+      BRIDGE_URL: http://agent-runtime:9070
+      AGENT_KEY_DATA_ANALYST_01: ${AGENT_KEY_DATA_ANALYST_01:-}
+      AGENT_KEY_REPORT_WRITER_01: ${AGENT_KEY_REPORT_WRITER_01:-}
+    networks: [agents]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: "no"
+    mem_limit: 512m
+
+  workflow-test:   # runs the workflow with the scripted model and plays the reviewer
+    profiles: [test]
+    <<: *hardening
+    image: governance-tier3/workflow:stage6
+    command: ["python", "test_workflow.py"]
+    environment:
+      <<: *workflow-env
+      CONSOLE_URL: http://console:8088
+      CONSOLE_PASSWORD: ${CONSOLE_PASSWORD}
+    networks: [agents]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: "no"
+
+  ollama:   # the model inside the organisation. On the models network only: no route out, reached only by the adapter
+    profiles: [workflow]
+    image: ollama/ollama:0.35.1
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    networks: [models]
+    volumes:
+      - ollama-data:/root/.ollama
+
+  ollama-pull:   # one-off download of the local model. The only time this volume meets the outside
+    profiles: [setup]
+    image: ollama/ollama:0.35.1
+    entrypoint: ["/bin/sh", "-c", "ollama serve >/dev/null 2>&1 & sleep 4; ollama pull ${OLLAMA_MODEL:-llama3.2:3b}"]
+    networks: [egress]
+    volumes:
+      - ollama-data:/root/.ollama
+
+  # --- tools -------------------------------------------------------------------
+  mock-tools:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        APP_DIR: mock-tools
+    image: governance-tier3/mock-tools:stage2
+    environment:
+      PORT: "8000"
+    networks: [tools]
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 128m
+    healthcheck: *svc-health
+
+  # --- tests (profile: test) -----------------------------------------------------
+  e2e:   # plays operator, agent, reviewer, and auditor, so it sits on every network
+    <<: *test
+    command: ["python", "e2e_gateway.py"]
+    networks: [agents, control, tools]
+    environment:
+      GATEWAY_URL: http://policy-gateway:9090
+      PROVISIONER_URL: http://provisioner:9080
+      VESTIGIA_URL: http://vestigia:8002
+      MOCK_TOOLS_URL: http://mock-tools:8000
+      PROVISIONER_OPERATOR_KEY: ${PROVISIONER_OPERATOR_KEY}
+      GATEWAY_REVIEWER_KEY: ${GATEWAY_REVIEWER_KEY}
+      VESTIGIA_API_KEY: ${VESTIGIA_API_KEY}
+      PROVIDER_TEST: ${PROVIDER_TEST:-0}
+      CONSOLE_URL: http://console:8088
+      CONSOLE_PASSWORD: ${CONSOLE_PASSWORD}
+      BRIDGE_URL: http://agent-runtime:9070
+      AGENT_RUNTIME_KEY: ${AGENT_RUNTIME_KEY}
+      LOCAL_MODEL_TEST: ${LOCAL_MODEL_TEST:-0}
+    volumes:
+      - ./tests:/tests:ro
+      - probe-state:/state
+    depends_on:
+      policy-gateway: {condition: service_healthy}
+      provisioner: {condition: service_healthy}
+      mock-tools: {condition: service_healthy}
+
+  agent-probe:   # sees only what an agent sees
+    <<: *test
+    command: ["python", "isolation_probe.py"]
+    networks: [agents]
+    volumes:
+      - ./tests:/tests:ro
+    depends_on:
+      policy-gateway: {condition: service_healthy}
+      provisioner: {condition: service_healthy}
+
+  ledger-verify:   # reads the ledger files directly: no network, no call to Vestigia
+    <<: *test
+    command: ["python", "/tools/verify_ledger.py", "--data-dir", "/data"]
+    network_mode: none
+    environment:
+      VESTIGIA_SECRET_SALT: ${VESTIGIA_SECRET_SALT}
+    volumes:
+      - ./tools:/tools:ro
+      - vestigia-data:/data:ro
+
+  telemetry-show:   # reads the collector's files directly: no network
+    <<: *test
+    command: ["python", "/tools/telemetry_summary.py", "--dir", "/telemetry"]
+    network_mode: none
+    user: "0:0"          # the collector's files are owned by root
+    volumes:
+      - ./tools:/tools:ro
+      - telemetry-data:/telemetry:ro
+
+  test-runner:   # Stage 1 foundation test, on the control network
+    <<: *test
+    command: ["python", "smoke_foundation.py"]
+    networks: [control]
+    environment:
+      TESSERA_URL: http://tessera:8001
+      VESTIGIA_URL: http://vestigia:8002
+      OPA_URL: http://opa:8181
+      VALKEY_URL: redis://:${VALKEY_PASSWORD}@valkey:6379/0
+      TESSERA_ADMIN_KEY: ${TESSERA_ADMIN_KEY}
+      VESTIGIA_API_KEY: ${VESTIGIA_API_KEY}
+    volumes:
+      - ./tests:/tests:ro
+    depends_on:
+      tessera: {condition: service_healthy}
+      vestigia: {condition: service_healthy}
+      opa: {condition: service_started}
+
+networks:
+  agents:
+    internal: true
+  control:
+    internal: true
+  tools:
+    internal: true
+  models:
+    internal: true
+  egress: {}          # not internal: the model adapter's route to the provider
+  ui:                 # lets the console publish its port. Outbound traffic from it is not translated, so it goes nowhere
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+
+volumes:
+  valkey-data:
+  vestigia-data:
+  tessera-data:
+  tessera-state:
+  probe-state:
+  telemetry-data:
+  agent-keys:
+  console-accounts:
+  ollama-data:
+  ollama-checker-data:

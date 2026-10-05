@@ -1,0 +1,73 @@
+# OpenTelemetry Collector for the policy gateway (Observability Plane, Profile 3).
+#
+# Profile 3 runs it in lightweight mode: telemetry is sent in the background and
+# never delays or blocks a request. If the collector is down, the gateway carries
+# on. The audit ledger, not telemetry, is the record of what was decided.
+#
+# Traces are sampled after the fact: every denied, referred, or failed request is
+# kept, and one in ten allowed requests. Metrics count every request.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 200
+    spike_limit_mib: 50
+
+  tail_sampling:
+    decision_wait: 5s
+    num_traces: 20000
+    policies:
+      - name: keep-denied-and-referred
+        type: string_attribute
+        string_attribute:
+          key: governance.outcome
+          values: [deny, refer]
+      - name: keep-errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: sample-allowed
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10
+
+  batch:
+    timeout: 5s
+    send_batch_size: 200
+
+exporters:
+  file/traces:
+    path: ${env:TELEMETRY_DIR}/traces.jsonl
+    rotation:
+      max_megabytes: 20
+      max_backups: 3
+  file/metrics:
+    path: ${env:TELEMETRY_DIR}/metrics.jsonl
+    rotation:
+      max_megabytes: 20
+      max_backups: 3
+  # For a Prometheus server to scrape, when one is added (Profile 2).
+  prometheus:
+    endpoint: 0.0.0.0:8889
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, tail_sampling, batch]
+      exporters: [file/traces]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [file/metrics, prometheus]
